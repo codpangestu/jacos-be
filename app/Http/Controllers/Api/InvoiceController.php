@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
+use App\Models\GradeLevel;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Student;
+use App\Services\InvoiceGenerationService;
 use App\Services\MidtransService;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 
 class InvoiceController extends Controller
@@ -78,9 +81,23 @@ class InvoiceController extends Controller
         }
 
         if ($parsed['transaction_status'] === 'settlement') {
-            $payment->update(['status' => 'settlement', 'paid_at' => now(), 'raw_payload' => $parsed]);
+            $payment->update([
+                'status' => 'settlement',
+                'method' => $parsed['payment_type'] ?? $payment->method,
+                'paid_at' => now(),
+                'raw_payload' => $parsed,
+            ]);
             $payment->invoice->update(['status' => 'lunas']);
-            // TODO: dispatch push notification "konfirmasi pembayaran berhasil" (FR-BE-4.6).
+
+            $invoice = $payment->invoice->load('student.parents');
+            NotificationService::sendMany(
+                $invoice->student->parents,
+                'Pembayaran Berhasil',
+                "Pembayaran tagihan {$invoice->invoice_number} periode {$invoice->period} sebesar Rp".
+                    number_format((float) $invoice->amount, 0, ',', '.').' telah dikonfirmasi. Terima kasih.',
+                null,
+                '/ortu/payments/history'
+            );
         } elseif (in_array($parsed['transaction_status'], ['expire', 'cancel', 'deny'], true)) {
             $payment->update(['status' => 'failed', 'raw_payload' => $parsed]);
         }
@@ -130,15 +147,77 @@ class InvoiceController extends Controller
     }
 
     /**
-     * FR-BE-4.8 — dashboard keuangan ringkas.
+     * Aksi manual Admin "Generate Invoices" (ported dari jacos-react — melengkapi
+     * cron `invoices:generate-monthly` untuk kasus perlu generate ulang di luar jadwal).
+     * Idempotent: invoice yang sudah ada untuk periode berjalan tidak dibuat ulang.
+     */
+    public function generate(Request $request, InvoiceGenerationService $service)
+    {
+        $result = $service->run();
+
+        AuditLog::record($request->user()->id, 'invoice.generate_manual', Invoice::class, null, null, $result);
+
+        return response()->json($result);
+    }
+
+    /**
+     * FR-BE-4.8 — dashboard keuangan, dilengkapi dengan analitik (ported dari
+     * jacos-react finance/Dashboard.jsx): collection rate, breakdown per tingkat,
+     * breakdown per kanal pembayaran, dan tren 6 bulan terakhir.
      */
     public function dashboard()
     {
+        $totalInvoices = Invoice::count();
+        $totalBilled = (float) Invoice::sum('amount');
+        $totalPaid = (float) Invoice::where('status', 'lunas')->sum('amount');
+        $totalOutstanding = (float) Invoice::where('status', 'belum_bayar')->sum('amount');
+        $overdueCount = Invoice::where('status', 'belum_bayar')->where('due_date', '<', now())->count();
+
+        $byGrade = GradeLevel::query()
+            ->get()
+            ->map(function (GradeLevel $grade) {
+                $studentIds = Student::whereHas('classroom', fn ($q) => $q->where('grade_level_id', $grade->id))->pluck('id');
+                $billed = Invoice::whereIn('student_id', $studentIds)->sum('amount');
+                $paid = Invoice::whereIn('student_id', $studentIds)->where('status', 'lunas')->sum('amount');
+
+                return [
+                    'grade_level' => $grade->name,
+                    'billed' => (float) $billed,
+                    'paid' => (float) $paid,
+                    'collection_rate' => $billed > 0 ? round($paid / $billed * 100, 1) : 0,
+                ];
+            })
+            ->filter(fn ($row) => $row['billed'] > 0)
+            ->values();
+
+        $byChannel = Payment::where('status', 'settlement')
+            ->selectRaw('method, count(*) as count, sum(amount) as total')
+            ->groupBy('method')
+            ->get()
+            ->map(fn ($row) => ['method' => $row->method, 'count' => $row->count, 'total' => (float) $row->total]);
+
+        $trend = collect(range(5, 0))->map(function (int $monthsAgo) {
+            $period = now()->subMonths($monthsAgo)->format('Y-m');
+            $billed = (float) Invoice::where('period', $period)->sum('amount');
+            $paid = (float) Invoice::where('period', $period)->where('status', 'lunas')->sum('amount');
+
+            return [
+                'period' => $period,
+                'billed' => $billed,
+                'paid' => $paid,
+                'collection_rate' => $billed > 0 ? round($paid / $billed * 100, 1) : 0,
+            ];
+        })->values();
+
         return response()->json([
-            'total_invoices' => Invoice::count(),
-            'total_paid' => Invoice::where('status', 'lunas')->sum('amount'),
-            'total_outstanding' => Invoice::where('status', 'belum_bayar')->sum('amount'),
-            'overdue_count' => Invoice::where('status', 'belum_bayar')->where('due_date', '<', now())->count(),
+            'total_invoices' => $totalInvoices,
+            'total_paid' => $totalPaid,
+            'total_outstanding' => $totalOutstanding,
+            'overdue_count' => $overdueCount,
+            'collection_rate' => $totalBilled > 0 ? round($totalPaid / $totalBilled * 100, 1) : 0,
+            'by_grade' => $byGrade,
+            'by_channel' => $byChannel,
+            'trend' => $trend,
         ]);
     }
 }

@@ -7,8 +7,10 @@ use App\Models\AcademicCalendarHoliday;
 use App\Models\AuditLog;
 use App\Models\Classroom;
 use App\Models\DismissalSetting;
+use App\Models\Staff;
 use App\Models\Student;
 use App\Models\StudentAttendance;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
@@ -70,6 +72,9 @@ class AttendanceController extends Controller
             return response()->json(['message' => 'Hari libur, tidak perlu absensi.'], 422);
         }
 
+        $statusLabels = ['izin' => 'Izin', 'sakit' => 'Sakit', 'alpa' => 'Alpa/Tanpa Keterangan'];
+        $notified = 0;
+
         foreach ($data['records'] as $record) {
             StudentAttendance::updateOrCreate(
                 ['student_id' => $record['student_id'], 'date' => $data['date']],
@@ -80,13 +85,22 @@ class AttendanceController extends Controller
                 ]
             );
 
-            // FR-BE-1.5: notify parents when status is not "hadir" (or always, per school setting)
+            // FR-BE-1.5: notify parents when status is not "hadir".
             if ($record['status'] !== 'hadir') {
-                // TODO: dispatch push notification job to student's parents.
+                $student = Student::with('parents')->find($record['student_id']);
+                NotificationService::sendMany(
+                    $student->parents,
+                    'Absensi: '.$statusLabels[$record['status']],
+                    "{$student->name} tercatat {$statusLabels[$record['status']]} pada ".Carbon::parse($data['date'])->translatedFormat('d M Y').
+                        ($record['note'] ? '. Catatan: '.$record['note'] : '.'),
+                    null,
+                    '/ortu/attendance'
+                );
+                $notified++;
             }
         }
 
-        return response()->json(['message' => 'Absensi tersimpan.']);
+        return response()->json(['message' => 'Absensi tersimpan.', 'notified' => $notified]);
     }
 
     /**
@@ -127,6 +141,17 @@ class AttendanceController extends Controller
             $attendance->only(['status', 'note'])
         );
 
+        $statusLabels = ['hadir' => 'Hadir', 'izin' => 'Izin', 'sakit' => 'Sakit', 'alpa' => 'Alpa/Tanpa Keterangan'];
+        $student = Student::with('parents')->find($data['student_id']);
+        NotificationService::sendMany(
+            $student->parents,
+            'Koreksi Absensi',
+            "Absensi {$student->name} pada ".Carbon::parse($data['date'])->translatedFormat('d M Y').
+                " dikoreksi menjadi {$statusLabels[$data['status']]}.",
+            null,
+            '/ortu/attendance'
+        );
+
         return response()->json(['message' => 'Absensi diperbarui.']);
     }
 
@@ -145,6 +170,64 @@ class AttendanceController extends Controller
             ->get(['date', 'status', 'note']);
 
         return response()->json(['student_id' => $student->id, 'month' => $month, 'attendances' => $attendances]);
+    }
+
+    /**
+     * Papan status pengisian absensi lintas-rombel untuk Admin (ported dari
+     * jacos-react — dashboard Admin perlu tahu wali kelas mana yang belum
+     * input absensi hari ini, tanpa harus buka tiap rombel satu-satu).
+     */
+    public function adminSubmissionStatus(Request $request)
+    {
+        $date = $request->query('date', now()->toDateString());
+
+        $classrooms = Classroom::with('homeroomTeacher.user:id,name')
+            ->withCount(['students' => fn ($q) => $q->where('status', 'active')])
+            ->get()
+            ->map(function (Classroom $classroom) use ($date) {
+                $isHoliday = $this->isHoliday($classroom, $date);
+                $marked = $isHoliday ? 0 : StudentAttendance::where('date', $date)
+                    ->whereIn('student_id', $classroom->students()->where('status', 'active')->pluck('id'))
+                    ->count();
+
+                return [
+                    'classroom_id' => $classroom->id,
+                    'classroom_name' => $classroom->name,
+                    'homeroom_teacher' => $classroom->homeroomTeacher?->user?->name,
+                    'homeroom_teacher_id' => $classroom->homeroomTeacher?->user_id,
+                    'total_students' => $classroom->students_count,
+                    'marked' => $marked,
+                    'is_holiday' => $isHoliday,
+                    'status' => $isHoliday
+                        ? 'holiday'
+                        : ($classroom->students_count === 0
+                            ? 'no_students'
+                            : ($marked === 0 ? 'not_started' : ($marked < $classroom->students_count ? 'partial' : 'complete'))),
+                ];
+            });
+
+        return response()->json(['date' => $date, 'classrooms' => $classrooms]);
+    }
+
+    /**
+     * Kirim notifikasi pengingat ke wali kelas yang belum/belum selesai input absensi.
+     */
+    public function remindTeacher(Request $request, Classroom $classroom)
+    {
+        $classroom->loadMissing('homeroomTeacher.user');
+        $teacherUser = $classroom->homeroomTeacher?->user;
+
+        abort_if(! $teacherUser, 422, 'Rombel ini belum punya wali kelas.');
+
+        NotificationService::send(
+            $teacherUser,
+            'Pengingat Input Absensi',
+            "Absensi rombel {$classroom->name} hari ini belum lengkap. Mohon segera diisi.",
+            null,
+            '/guru/attendance'
+        );
+
+        return response()->json(['message' => 'Pengingat terkirim ke wali kelas.']);
     }
 
     private function isHoliday(Classroom $classroom, string $date): bool

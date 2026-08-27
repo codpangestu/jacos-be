@@ -17,7 +17,10 @@ class DismissalSettingController extends Controller
     {
         $data = $request->validate([
             'cutoff_time' => ['required', 'date_format:H:i'],
+            'staff_check_in_deadline' => ['required', 'date_format:H:i'],
             'attendance_edit_tolerance_days' => ['required', 'integer', 'min:0', 'max:30'],
+            'pickup_qr_validity_days' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'invoice_due_date_days' => ['required', 'integer', 'min:1', 'max:60'],
         ]);
 
         $setting = DismissalSetting::firstOrCreate([]);

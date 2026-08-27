@@ -9,7 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Student extends Model
 {
-    protected $fillable = ['classroom_id', 'nis', 'name', 'birth_date', 'gender', 'status', 'inactive_at'];
+    protected $fillable = [
+        'classroom_id', 'nis', 'name', 'birth_date', 'gender', 'status', 'inactive_at',
+        'blood_type', 'address', 'emergency_contact', 'photo_path',
+    ];
 
     protected function casts(): array
     {

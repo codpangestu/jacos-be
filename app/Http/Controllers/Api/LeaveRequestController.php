@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LeaveRequest;
+use App\Models\User;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 
 class LeaveRequestController extends Controller
@@ -58,6 +60,14 @@ class LeaveRequestController extends Controller
             'status' => 'pending',
         ]);
 
+        NotificationService::sendMany(
+            User::where('role', 'admin')->get(),
+            'Pengajuan Cuti Baru',
+            "{$staff->name} mengajukan {$data['type']} ({$leaveRequest->start_date->translatedFormat('d M Y')} - {$leaveRequest->end_date->translatedFormat('d M Y')}).",
+            null,
+            '/admin/leave-requests'
+        );
+
         return response()->json(['leave_request' => $leaveRequest], 201);
     }
 
@@ -69,8 +79,8 @@ class LeaveRequestController extends Controller
         $this->authorize('review', $leaveRequest);
 
         $data = $request->validate([
-            'status' => ['required', 'in:approved,rejected'],
-            'review_note' => ['required_if:status,rejected', 'nullable', 'string'],
+            'status' => ['required', 'in:approved,rejected,revision_requested'],
+            'review_note' => ['required_unless:status,approved', 'nullable', 'string'],
         ]);
 
         $leaveRequest->update([
@@ -80,7 +90,22 @@ class LeaveRequestController extends Controller
             'reviewed_at' => now(),
         ]);
 
-        // TODO: dispatch push notification to the staff member (FR-BE-3.5).
+        $titles = [
+            'approved' => 'Pengajuan Cuti Disetujui',
+            'rejected' => 'Pengajuan Cuti Ditolak',
+            'revision_requested' => 'Pengajuan Cuti Perlu Revisi',
+        ];
+        $staffUser = $leaveRequest->staff->user;
+        if ($staffUser) {
+            NotificationService::send(
+                $staffUser,
+                $titles[$data['status']],
+                "Pengajuan cuti Anda ({$leaveRequest->start_date->translatedFormat('d M Y')} - {$leaveRequest->end_date->translatedFormat('d M Y')}) ".
+                    ($data['review_note'] ? 'dengan catatan: '.$data['review_note'] : 'telah diproses.'),
+                null,
+                $staffUser->role === 'guru' ? '/guru/leave-requests' : '/staff/leave-requests'
+            );
+        }
 
         return response()->json(['leave_request' => $leaveRequest]);
     }

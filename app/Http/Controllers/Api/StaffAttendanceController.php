@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\StaffAttendance;
+use App\Support\CsvExport;
 use Illuminate\Http\Request;
 
 class StaffAttendanceController extends Controller
@@ -96,13 +97,38 @@ class StaffAttendanceController extends Controller
 
     public function index(Request $request)
     {
-        $query = StaffAttendance::with('staff:id,name')
+        return response()->json($this->filteredQuery($request)->paginate(30));
+    }
+
+    /**
+     * Export CSV rekap absensi staff — filter sama dgn index(), semua baris cocok.
+     */
+    public function export(Request $request)
+    {
+        $rows = $this->filteredQuery($request)->get();
+
+        return CsvExport::download(
+            'rekap-absensi-staff-'.now()->format('Y-m-d').'.csv',
+            ['Nama Staff', 'Tanggal', 'Check-in', 'Check-out', 'Terlambat', 'Dikoreksi Admin'],
+            $rows,
+            fn (StaffAttendance $a) => [
+                $a->staff?->name ?? '-',
+                $a->date->format('Y-m-d'),
+                $a->check_in_time?->format('H:i') ?? '-',
+                $a->check_out_time?->format('H:i') ?? '-',
+                $a->is_late ? 'Ya' : 'Tidak',
+                $a->corrected_by_admin ? 'Ya' : 'Tidak',
+            ]
+        );
+    }
+
+    private function filteredQuery(Request $request)
+    {
+        return StaffAttendance::with('staff:id,name')
             ->when($request->query('staff_id'), fn ($q, $id) => $q->where('staff_id', $id))
             ->when($request->query('from'), fn ($q, $d) => $q->where('date', '>=', $d))
             ->when($request->query('to'), fn ($q, $d) => $q->where('date', '<=', $d))
             ->latest('date');
-
-        return response()->json($query->paginate(30));
     }
 
     private function staffFor(Request $request)

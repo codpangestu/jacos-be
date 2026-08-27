@@ -13,6 +13,7 @@ class AuditLogController extends Controller
         $query = AuditLog::with('user:id,name')
             ->when($request->query('user_id'), fn ($q, $id) => $q->where('user_id', $id))
             ->when($request->query('entity_type'), fn ($q, $t) => $q->where('entity_type', $t))
+            ->when($request->query('entity_id'), fn ($q, $id) => $q->where('entity_id', $id))
             ->when($request->query('from'), fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
             ->when($request->query('to'), fn ($q, $d) => $q->whereDate('created_at', '<=', $d))
             ->latest();
