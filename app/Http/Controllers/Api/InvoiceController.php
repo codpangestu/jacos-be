@@ -136,13 +136,16 @@ class InvoiceController extends Controller
     {
         $this->authorize('view', $invoice->student);
 
+        $settledPayment = $invoice->payments()->where('status', 'settlement')->latest('paid_at')->first();
+
         return response()->json([
             'invoice_number' => $invoice->invoice_number,
             'student_name' => $invoice->student->name,
             'period' => $invoice->period,
             'amount' => $invoice->amount,
             'status' => $invoice->status,
-            'paid_at' => $invoice->payments()->where('status', 'settlement')->value('paid_at'),
+            'paid_at' => $settledPayment?->paid_at,
+            'method' => $settledPayment?->method,
         ]);
     }
 

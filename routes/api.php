@@ -77,6 +77,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── Orang Tua ─────────────────────────────────────────────────────────
     Route::middleware('role:orang_tua')->prefix('ortu')->group(function () {
         Route::get('/children', [OrtuChildController::class, 'index']);
+        Route::get('/children/{student}', [OrtuChildController::class, 'show']);
         Route::get('/children/{student}/attendance', [AttendanceController::class, 'forChild']);
         Route::get('/children/{student}/pickups', [PickupController::class, 'index']);
         Route::post('/children/{student}/pickups', [PickupController::class, 'store']);

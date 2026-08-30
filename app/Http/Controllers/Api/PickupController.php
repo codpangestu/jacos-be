@@ -30,9 +30,9 @@ class PickupController extends Controller
     }
 
     /**
-     * FR-BE-2.1 / FR-BE-2.2 — tambah penjemput sah. Status awal PENDING APPROVAL
-     * (ported dari jacos-react REQUIREMENTS.md §4): QR belum aktif dipakai sampai
-     * Admin memverifikasi dokumen identitas & approve.
+     * FR-BE-2.1 / FR-BE-2.2 — tambah penjemput sah. Langsung AKTIF saat dibuat
+     * (keputusan user 2026-08-28: approval Admin dihapus dari alur ini — QR
+     * bisa langsung dipakai tanpa menunggu verifikasi dokumen manual).
      */
     public function store(Request $request, Student $student)
     {
@@ -52,42 +52,40 @@ class PickupController extends Controller
             'name' => $data['name'],
             'relationship' => $data['relationship'],
             'photo_path' => $photoPath,
+            'approved_at' => now(),
+            'valid_until' => $this->defaultValidUntil(),
         ]);
-
-        NotificationService::sendMany(
-            User::where('role', 'admin')->get(),
-            'Penjemput Baru Menunggu Persetujuan',
-            "{$data['name']} ({$data['relationship']}) didaftarkan sebagai penjemput {$student->name}, menunggu verifikasi dokumen.",
-            null,
-            '/admin/pickup-approvals'
-        );
 
         return response()->json(['pickup' => $pickup], 201);
     }
 
     /**
-     * Approve penjemput (Admin, setelah verifikasi dokumen identitas manual di
-     * kantor TU) — baru di sini QR benar-benar bisa dipakai. valid_until default
-     * sampai akhir tahun ajaran aktif.
+     * Approve penjemput — dipertahankan utk data lama yang masih Pending
+     * Approval dari sebelum keputusan 2026-08-28 (lihat store()), bukan lagi
+     * bagian dari alur normal tambah penjemput baru.
      */
     public function approve(Request $request, AuthorizedPickup $pickup)
     {
         abort_if($pickup->status !== 'pending_approval', 422, 'Penjemput ini bukan status Pending Approval.');
 
-        $validityDays = DismissalSetting::query()->value('pickup_qr_validity_days');
-        $validUntil = $validityDays
-            ? now()->addDays($validityDays)->toDateString()
-            : AcademicYear::where('is_active', true)->value('end_date');
-
         $pickup->update([
             'approved_at' => now(),
             'approved_by' => $request->user()->id,
-            'valid_until' => $validUntil,
+            'valid_until' => $this->defaultValidUntil(),
         ]);
 
         AuditLog::record($request->user()->id, 'pickup_person.approved', AuthorizedPickup::class, $pickup->id, null, ['approved_by' => $request->user()->id]);
 
         return response()->json(['pickup' => $pickup->fresh()]);
+    }
+
+    private function defaultValidUntil(): ?string
+    {
+        $validityDays = DismissalSetting::query()->value('pickup_qr_validity_days');
+
+        return $validityDays
+            ? now()->addDays($validityDays)->toDateString()
+            : AcademicYear::where('is_active', true)->value('end_date');
     }
 
     /**
