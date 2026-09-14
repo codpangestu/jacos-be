@@ -17,16 +17,30 @@ class AnnouncementController extends Controller
 
     /**
      * Feed pengumuman untuk dashboard tiap role — hanya yang ditujukan ke role
-     * pengguna atau berlaku untuk semua (target_role null).
+     * pengguna atau berlaku untuk semua (target_role null), dan belum kedaluwarsa.
      */
     public function feed(Request $request)
     {
         $announcements = Announcement::where(fn ($q) => $q->whereNull('target_role')->orWhere('target_role', $request->user()->role))
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', now()->toDateString()))
             ->latest()
             ->limit(5)
             ->get();
 
         return response()->json(['announcements' => $announcements]);
+    }
+
+    /**
+     * Riwayat pengumuman penuh untuk role pengguna (termasuk yang sudah
+     * kedaluwarsa) — dipakai halaman "Riwayat Pengumuman" per role.
+     */
+    public function history(Request $request)
+    {
+        $announcements = Announcement::where(fn ($q) => $q->whereNull('target_role')->orWhere('target_role', $request->user()->role))
+            ->latest()
+            ->paginate(15);
+
+        return response()->json($announcements);
     }
 
     public function store(Request $request)
@@ -35,12 +49,13 @@ class AnnouncementController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'body' => ['required', 'string'],
             'target_role' => ['nullable', 'in:guru,orang_tua,staff'],
+            'expires_at' => ['nullable', 'date', 'after_or_equal:today'],
         ]);
 
         $announcement = Announcement::create([...$data, 'created_by' => $request->user()->id]);
 
-        $dashboardUrl = ['guru' => '/guru/dashboard', 'staff' => '/staff/dashboard', 'orang_tua' => '/ortu/dashboard'];
-        $roles = $data['target_role'] ?? null ? [$data['target_role']] : array_keys($dashboardUrl);
+        $historyUrl = ['guru' => '/guru/announcements', 'staff' => '/staff/announcements', 'orang_tua' => '/ortu/announcements'];
+        $roles = $data['target_role'] ?? null ? [$data['target_role']] : array_keys($historyUrl);
 
         foreach ($roles as $role) {
             NotificationService::sendMany(
@@ -48,7 +63,7 @@ class AnnouncementController extends Controller
                 'Pengumuman: '.$announcement->title,
                 $announcement->body,
                 null,
-                $dashboardUrl[$role]
+                $historyUrl[$role]
             );
         }
 
@@ -61,6 +76,7 @@ class AnnouncementController extends Controller
             'title' => ['sometimes', 'string', 'max:255'],
             'body' => ['sometimes', 'string'],
             'target_role' => ['nullable', 'in:guru,orang_tua,staff'],
+            'expires_at' => ['nullable', 'date'],
         ]);
 
         $announcement->update($data);

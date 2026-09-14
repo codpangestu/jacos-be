@@ -18,10 +18,12 @@ use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\LeaveRequestController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\Ortu\AcademicCalendarController as OrtuAcademicCalendarController;
 use App\Http\Controllers\Api\Ortu\ChildController as OrtuChildController;
 use App\Http\Controllers\Api\PickupController;
 use App\Http\Controllers\Api\PushSubscriptionController;
 use App\Http\Controllers\Api\StaffAttendanceController;
+use App\Http\Controllers\Api\StudentLeaveRequestController;
 use Illuminate\Support\Facades\Route;
 
 // ── Public ───────────────────────────────────────────────────────────────
@@ -42,12 +44,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 
     Route::get('/announcements', [AnnouncementController::class, 'feed']);
+    Route::get('/announcements/history', [AnnouncementController::class, 'history']);
 
     Route::post('/push/subscribe', [PushSubscriptionController::class, 'store']);
     Route::delete('/push/subscribe', [PushSubscriptionController::class, 'destroy']);
 
     Route::middleware('role:guru')->group(function () {
         Route::get('/guru/classrooms', [GuruClassroomController::class, 'index']);
+        Route::get('/guru/student-leave-requests', [StudentLeaveRequestController::class, 'indexForTeacher']);
+        Route::patch('/guru/student-leave-requests/{studentLeaveRequest}/review', [StudentLeaveRequestController::class, 'review']);
     });
 
     // FR-BE-2.3/2.4 — verifikasi jemput, bisa dilakukan Guru, Staff, atau Admin.
@@ -89,6 +94,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/consents', [ConsentController::class, 'index']);
         Route::post('/consents', [ConsentController::class, 'store']);
         Route::post('/consents/{consent}/withdraw', [ConsentController::class, 'withdraw']);
+        Route::get('/leave-requests', [StudentLeaveRequestController::class, 'indexForParent']);
+        Route::post('/leave-requests', [StudentLeaveRequestController::class, 'store']);
+        Route::get('/calendar/upcoming', [OrtuAcademicCalendarController::class, 'upcoming']);
     });
 
     // ── Admin ─────────────────────────────────────────────────────────────

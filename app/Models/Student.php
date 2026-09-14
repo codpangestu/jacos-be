@@ -59,6 +59,11 @@ class Student extends Model
         return $this->hasMany(Invoice::class);
     }
 
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(StudentLeaveRequest::class);
+    }
+
     public function hasActiveConsentFor(int $parentId): bool
     {
         return $this->consents()

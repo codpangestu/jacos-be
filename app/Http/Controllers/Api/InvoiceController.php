@@ -24,9 +24,20 @@ class InvoiceController extends Controller
 
         $query = $student->invoices()
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
+            ->with(['payments' => fn ($q) => $q->where('status', 'settlement')->latest('paid_at')->limit(1)])
             ->latest('due_date');
 
-        return response()->json(['invoices' => $query->get()]);
+        $invoices = $query->get()->map(function (Invoice $invoice) {
+            $settled = $invoice->payments->first();
+            $data = $invoice->toArray();
+            unset($data['payments']);
+            $data['paid_at'] = $settled?->paid_at;
+            $data['payment_method'] = $settled?->method;
+
+            return $data;
+        });
+
+        return response()->json(['invoices' => $invoices]);
     }
 
     /**

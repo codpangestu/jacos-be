@@ -34,6 +34,7 @@ class ChildController extends Controller
 
                 return [
                     'id' => $student->id,
+                    'nis' => $student->nis,
                     'name' => $student->name,
                     'gender' => $student->gender,
                     'photo_path' => $student->photo_path,
@@ -59,7 +60,7 @@ class ChildController extends Controller
      * lihat field ringkas dari index(). Reuse `StudentPolicy::view` yang sudah
      * menegakkan consent (sama seperti endpoint ortu lain).
      */
-    public function show(Request $request, Student $student)
+    public function show(Student $student)
     {
         $this->authorize('view', $student);
 
