@@ -268,13 +268,16 @@ class PickupController extends Controller
 
     /**
      * Siswa aktif hari ini yang belum checkout — dipakai dashboard Admin/Guru (FR-BE-2.9 dasar).
+     * Siswa yang absensinya hari ini izin/sakit/alpa dikecualikan — mereka memang
+     * tidak datang ke sekolah, jadi bukan kandidat "belum dijemput".
      */
     public function notPickedUpToday(Request $request)
     {
         $today = now()->toDateString();
 
         $query = Student::where('status', 'active')
-            ->whereDoesntHave('pickupLogs', fn ($q) => $q->where('date', $today));
+            ->whereDoesntHave('pickupLogs', fn ($q) => $q->where('date', $today))
+            ->whereDoesntHave('attendances', fn ($q) => $q->where('date', $today)->whereIn('status', ['izin', 'sakit', 'alpa']));
 
         if ($request->query('classroom_id')) {
             $query->where('classroom_id', $request->query('classroom_id'));
