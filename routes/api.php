@@ -142,6 +142,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/announcements/{announcement}', [AnnouncementController::class, 'destroy']);
 
         Route::get('/attendance/submission-status', [AttendanceController::class, 'adminSubmissionStatus']);
+        Route::get('/reports/attendance/today-summary', [AttendanceController::class, 'todaySummary']);
         Route::post('/classrooms/{classroom}/attendance/remind', [AttendanceController::class, 'remindTeacher']);
 
         Route::get('/pickup-logs', [PickupController::class, 'adminIndex']);

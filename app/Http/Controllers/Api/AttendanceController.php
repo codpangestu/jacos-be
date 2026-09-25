@@ -173,6 +173,81 @@ class AttendanceController extends Controller
     }
 
     /**
+     * GET /api/admin/reports/attendance/today-summary
+     *
+     * Endpoint agregasi 1-hit untuk Admin Dashboard — menggantikan pola N+1
+     * useQueries per rombel di frontend. Mengembalikan:
+     *   - total_students, hadir, izin, sakit, alpa  (school-wide)
+     *   - by_classroom[]  per-rombel: id, name, total, hadir, izin, sakit, alpa
+     *   - date  tanggal yang dipakai (default: hari ini)
+     *
+     * Query hanya 2 hit DB: 1 untuk ambil rombel aktif + eager-load siswa,
+     * 1 untuk ambil semua StudentAttendance hari ini dalam satu query bulk.
+     */
+    public function todaySummary(Request $request)
+    {
+        $date = $request->query('date', now()->toDateString());
+
+        // 1. Ambil semua rombel beserta daftar student_id aktif-nya
+        $classrooms = Classroom::with([
+                'students' => fn ($q) => $q->where('status', 'active')->select('students.id', 'classroom_id'),
+            ])
+            ->select('id', 'name', 'academic_year_id')
+            ->get();
+
+        // Semua student_id aktif se-sekolah
+        $allStudentIds = $classrooms->flatMap(fn ($c) => $c->students->pluck('id'));
+
+        // 2. Satu query bulk untuk semua attendance hari ini
+        $attendances = StudentAttendance::whereIn('student_id', $allStudentIds)
+            ->where('date', $date)
+            ->get(['student_id', 'status']);
+
+        // Map student_id → status untuk lookup O(1)
+        $statusMap = $attendances->pluck('status', 'student_id');
+
+        $statuses = ['hadir', 'izin', 'sakit', 'alpa'];
+
+        // Agregasi per kelas
+        $byClassroom = $classrooms->map(function (Classroom $classroom) use ($statusMap, $statuses, $date) {
+            $isHoliday = $this->isHoliday($classroom, $date);
+            $studentIds = $classroom->students->pluck('id');
+
+            $counts = array_fill_keys($statuses, 0);
+            foreach ($studentIds as $sid) {
+                $s = $statusMap->get($sid);
+                if ($s && isset($counts[$s])) {
+                    $counts[$s]++;
+                }
+            }
+
+            return [
+                'classroom_id'   => $classroom->id,
+                'classroom_name' => $classroom->name,
+                'is_holiday'     => $isHoliday,
+                'total'          => $studentIds->count(),
+                ...$counts,
+            ];
+        });
+
+        // Agregasi school-wide
+        $schoolWide = array_fill_keys($statuses, 0);
+        foreach ($byClassroom as $row) {
+            foreach ($statuses as $s) {
+                $schoolWide[$s] += $row[$s];
+            }
+        }
+        $totalStudents = $byClassroom->sum('total');
+
+        return response()->json([
+            'date'           => $date,
+            'total_students' => $totalStudents,
+            ...$schoolWide,
+            'by_classroom'   => $byClassroom->values(),
+        ]);
+    }
+
+    /**
      * Papan status pengisian absensi lintas-rombel untuk Admin (ported dari
      * jacos-react — dashboard Admin perlu tahu wali kelas mana yang belum
      * input absensi hari ini, tanpa harus buka tiap rombel satu-satu).
