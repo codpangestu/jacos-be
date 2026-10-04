@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\Admin\StudentController;
 use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ComplaintController;
 use App\Http\Controllers\Api\ConsentController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
 use App\Http\Controllers\Api\InvoiceController;
@@ -45,6 +46,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/announcements', [AnnouncementController::class, 'feed']);
     Route::get('/announcements/history', [AnnouncementController::class, 'history']);
+
+    // Pengaduan — detail & balasan dipakai bareng Admin dan pengadu; siapa yang
+    // boleh akses dibatasi ComplaintPolicy, bukan middleware role.
+    Route::get('/complaints/{complaint}', [ComplaintController::class, 'show']);
+    Route::post('/complaints/{complaint}/replies', [ComplaintController::class, 'reply']);
 
     Route::post('/push/subscribe', [PushSubscriptionController::class, 'store']);
     Route::delete('/push/subscribe', [PushSubscriptionController::class, 'destroy']);
@@ -97,6 +103,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/leave-requests', [StudentLeaveRequestController::class, 'indexForParent']);
         Route::post('/leave-requests', [StudentLeaveRequestController::class, 'store']);
         Route::get('/calendar/upcoming', [OrtuAcademicCalendarController::class, 'upcoming']);
+
+        Route::get('/complaints', [ComplaintController::class, 'indexForParent']);
+        Route::post('/complaints', [ComplaintController::class, 'store']);
     });
 
     // ── Admin ─────────────────────────────────────────────────────────────
@@ -162,5 +171,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/audit-log', [AuditLogController::class, 'index']);
         Route::get('/consents', [ConsentController::class, 'adminIndex']);
+
+        Route::get('/complaints', [ComplaintController::class, 'adminIndex']);
+        // Didaftarkan sebelum rute ber-parameter supaya "assignees" tidak
+        // tertangkap sebagai {complaint}.
+        Route::get('/complaints/assignees', [ComplaintController::class, 'assignees']);
+        Route::patch('/complaints/{complaint}', [ComplaintController::class, 'update']);
+        Route::delete('/complaints/{complaint}', [ComplaintController::class, 'destroy']);
     });
 });
