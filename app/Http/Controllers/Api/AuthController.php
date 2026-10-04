@@ -29,12 +29,17 @@ class AuthController extends Controller
 
         $request->session()->regenerate();
 
+        $relationship = $user->isOrangTua()
+            ? $user->children()->first()?->pivot?->relationship
+            : null;
+
         return response()->json([
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
+                'relationship' => $relationship,
             ],
         ]);
     }
@@ -93,6 +98,9 @@ class AuthController extends Controller
     public function me(Request $request)
     {
         $user = $request->user();
+        $relationship = $user->isOrangTua()
+            ? $user->children()->first()?->pivot?->relationship
+            : null;
 
         return response()->json([
             'user' => [
@@ -100,6 +108,7 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
+                'relationship' => $relationship,
             ],
         ]);
     }

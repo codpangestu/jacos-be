@@ -58,18 +58,22 @@ class InvoiceController extends Controller
     {
         $this->authorize('view', $invoice->student);
 
-        if ($invoice->status !== 'belum_bayar') {
+        // Tagihan `terlambat` (lewat jatuh tempo) tetap HARUS bisa dibayar —
+        // sebelumnya cuma `belum_bayar` yang diterima, padahal justru tagihan
+        // telat yang paling perlu dibayar. Hanya status terminal yang ditolak.
+        if (! in_array($invoice->status, ['belum_bayar', 'terlambat'], true)) {
             return response()->json(['message' => 'Invoice ini tidak bisa dibayar (status: '.$invoice->status.').'], 422);
         }
 
         $transaction = $midtrans->createTransaction($invoice);
 
-        Payment::create([
-            'invoice_id' => $invoice->id,
-            'amount' => $invoice->amount,
-            'status' => 'pending',
-            'gateway_reference' => $transaction['token'],
-        ]);
+        // Idempotent: token stub Midtrans deterministik per invoice, jadi klik
+        // berulang memperbarui baris pending yang sama, bukan membuat tumpukan
+        // baris payment pending identik.
+        Payment::updateOrCreate(
+            ['invoice_id' => $invoice->id, 'gateway_reference' => $transaction['token'], 'status' => 'pending'],
+            ['amount' => $invoice->amount]
+        );
 
         return response()->json($transaction);
     }

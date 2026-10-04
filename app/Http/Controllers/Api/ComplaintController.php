@@ -17,7 +17,7 @@ class ComplaintController extends Controller
      */
     public function indexForParent(Request $request)
     {
-        $query = Complaint::with('student:id,name')
+        $query = Complaint::with(['student:id,name', 'submittedBy:id,name'])
             ->where('submitted_by', $request->user()->id)
             ->when($request->query('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($request->query('student_id'), fn ($q, $id) => $q->where('student_id', $id));
